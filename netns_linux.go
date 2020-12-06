@@ -26,6 +26,57 @@ const (
 	bindMountPath = "/run/netns" /* Bind mount path for named netns */
 )
 
+type OperationParameterSet struct {
+	BindMountPath string
+}
+
+// NewNamed creates a new named network namespace and returns a handle to it
+func (s *OperationParameterSet) NewNamed(name string) (NsHandle, error) {
+	if _, err := os.Stat(s.BindMountPath); os.IsNotExist(err) {
+		err = os.MkdirAll(s.BindMountPath, 0755)
+		if err != nil {
+			return None(), err
+		}
+	}
+
+	newNs, err := New()
+	if err != nil {
+		return None(), err
+	}
+
+	namedPath := path.Join(s.BindMountPath, name)
+
+	f, err := os.OpenFile(namedPath, os.O_CREATE|os.O_EXCL, 0444)
+	if err != nil {
+		return None(), err
+	}
+	f.Close()
+
+	nsPath := fmt.Sprintf("/proc/%d/task/%d/ns/net", os.Getpid(), syscall.Gettid())
+	err = syscall.Mount(nsPath, namedPath, "bind", syscall.MS_BIND, "")
+	if err != nil {
+		return None(), err
+	}
+
+	return newNs, nil
+}
+
+// DeleteNamed deletes a named network namespace
+func (s *OperationParameterSet) DeleteNamed(name string) error {
+	namedPath := path.Join(s.BindMountPath, name)
+
+	err := syscall.Unmount(namedPath, syscall.MNT_DETACH)
+	if err != nil {
+		return err
+	}
+
+	return os.Remove(namedPath)
+}
+
+var DefaultOperation = &OperationParameterSet{
+	BindMountPath: bindMountPath,
+}
+
 // Setns sets namespace using syscall. Note that this should be a method
 // in syscall but it has not been added.
 func Setns(ns NsHandle, nstype int) (err error) {
@@ -48,47 +99,10 @@ func New() (ns NsHandle, err error) {
 }
 
 // NewNamed creates a new named network namespace and returns a handle to it
-func NewNamed(name string) (NsHandle, error) {
-	if _, err := os.Stat(bindMountPath); os.IsNotExist(err) {
-		err = os.MkdirAll(bindMountPath, 0755)
-		if err != nil {
-			return None(), err
-		}
-	}
-
-	newNs, err := New()
-	if err != nil {
-		return None(), err
-	}
-
-	namedPath := path.Join(bindMountPath, name)
-
-	f, err := os.OpenFile(namedPath, os.O_CREATE|os.O_EXCL, 0444)
-	if err != nil {
-		return None(), err
-	}
-	f.Close()
-
-	nsPath := fmt.Sprintf("/proc/%d/task/%d/ns/net", os.Getpid(), syscall.Gettid())
-	err = syscall.Mount(nsPath, namedPath, "bind", syscall.MS_BIND, "")
-	if err != nil {
-		return None(), err
-	}
-
-	return newNs, nil
-}
+func NewNamed(name string) (NsHandle, error) { return DefaultOperation.NewNamed(name) }
 
 // DeleteNamed deletes a named network namespace
-func DeleteNamed(name string) error {
-	namedPath := path.Join(bindMountPath, name)
-
-	err := syscall.Unmount(namedPath, syscall.MNT_DETACH)
-	if err != nil {
-		return err
-	}
-
-	return os.Remove(namedPath)
-}
+func DeleteNamed(name string) error { return DefaultOperation.DeleteNamed(name) }
 
 // Get gets a handle to the current threads network namespace.
 func Get() (NsHandle, error) {
