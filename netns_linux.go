@@ -30,13 +30,35 @@ type OperationParameterSet struct {
 	BindMountPath string
 }
 
-// NewNamed creates a new named network namespace and returns a handle to it
-func (s *OperationParameterSet) NewNamed(name string) (NsHandle, error) {
+func (s *OperationParameterSet) ensureBindMountPath() (err error) {
 	if _, err := os.Stat(s.BindMountPath); os.IsNotExist(err) {
 		err = os.MkdirAll(s.BindMountPath, 0755)
 		if err != nil {
-			return None(), err
+			return err
 		}
+	}
+	return
+}
+
+func (s *OperationParameterSet) getNamedPath(name string) string {
+	return path.Join(s.BindMountPath, name)
+}
+
+// Open opens existing named network namespaced and return a handle to it.
+func (s *OperationParameterSet) Open(name string) (NsHandle, error) {
+	if err := s.ensureBindMountPath(); err != nil {
+		return None(), err
+	}
+
+	namedPath := s.getNamedPath(name)
+
+	return GetFromPath(namedPath)
+}
+
+// NewNamed creates a new named network namespace and returns a handle to it
+func (s *OperationParameterSet) NewNamed(name string) (NsHandle, error) {
+	if err := s.ensureBindMountPath(); err != nil {
+		return None(), err
 	}
 
 	newNs, err := New()
@@ -44,7 +66,7 @@ func (s *OperationParameterSet) NewNamed(name string) (NsHandle, error) {
 		return None(), err
 	}
 
-	namedPath := path.Join(s.BindMountPath, name)
+	namedPath := s.getNamedPath(name)
 
 	f, err := os.OpenFile(namedPath, os.O_CREATE|os.O_EXCL, 0444)
 	if err != nil {
